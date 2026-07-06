@@ -41,7 +41,7 @@ impl<W: Write> BinaryEncoder<W> {
         // entries
         for source in sources {
             let name = source.name.as_bytes(); // already UTF-8
-            self.writer.write_all(&[source.id as u8])?; // SourceId
+            self.writer.write_all(&[source.id])?; // SourceId
             self.writer.write_all(&[name.len() as u8])?; // NameLen
             self.writer.write_all(name)?; // Name
         }
@@ -75,39 +75,39 @@ impl<W: Write> Encode for BinaryEncoder<W> {
 
 fn encode_type_byte(kind: &EventKind, with_timestamp: bool) -> Result<u8> {
     let base: u8 = match kind {
-        EventKind::Sync => 0b0_000_0000,
-        EventKind::BranchTaken => 0b0_001_0001,
-        EventKind::BranchNotTaken => 0b0_001_0010,
-        EventKind::Interrupt => 0b0_001_0011,
-        EventKind::Rfi => 0b0_001_0101,
-        EventKind::Call => 0b0_001_0110,
-        EventKind::Return => 0b0_001_0111,
+        EventKind::Sync => 0b0000_0000,
+        EventKind::BranchTaken => 0b0001_0001,
+        EventKind::BranchNotTaken => 0b0001_0010,
+        EventKind::Interrupt => 0b0001_0011,
+        EventKind::Rfi => 0b0001_0101,
+        EventKind::Call => 0b0001_0110,
+        EventKind::Return => 0b0001_0111,
         EventKind::MemWrite(n) => match n {
-            0 => 0b0_010_0000,
-            1 => 0b0_010_0001,
-            2 => 0b0_010_0010,
-            4 => 0b0_010_0100,
-            8 => 0b0_010_1000,
+            0 => 0b0010_0000,
+            1 => 0b0010_0001,
+            2 => 0b0010_0010,
+            4 => 0b0010_0100,
+            8 => 0b0010_1000,
             _ => todo!("handle weird sizes"),
         },
         EventKind::MemRead(n) => match n {
-            0 => 0b0_011_0000,
-            1 => 0b0_011_0001,
-            2 => 0b0_011_0010,
-            4 => 0b0_011_0100,
-            8 => 0b0_011_1000,
+            0 => 0b0011_0000,
+            1 => 0b0011_0001,
+            2 => 0b0011_0010,
+            4 => 0b0011_0100,
+            8 => 0b0011_1000,
             _ => todo!("handle weird sizes"),
         },
-        EventKind::Overflow => 0b0_101_1111,
-        EventKind::Context => 0b0_100_0000,
-        EventKind::WallClock => 0b0_100_0001,
-        EventKind::Data => 0b0_110_0000,
-        EventKind::Counter => 0b0_110_0001,
-        EventKind::LastPC => 0b0_110_0010,
+        EventKind::Overflow => 0b0101_1111,
+        EventKind::Context => 0b0100_0000,
+        EventKind::WallClock => 0b0100_0001,
+        EventKind::Data => 0b0110_0000,
+        EventKind::Counter => 0b0110_0001,
+        EventKind::LastPC => 0b0110_0010,
         EventKind::Info(n) => match n {
-            1 => 0b0_111_0000,
-            2 => 0b0_111_0001,
-            3 => 0b0_111_0010,
+            1 => 0b0111_0000,
+            2 => 0b0111_0001,
+            3 => 0b0111_0010,
             _ => todo!("handle weird sizes"),
         },
     };

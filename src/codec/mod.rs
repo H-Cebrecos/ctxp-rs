@@ -185,13 +185,13 @@ impl FromStr for Event {
         let value1 = parts
             .next()
             .filter(|s| !s.is_empty())
-            .map(|s| parse_hex(s))
+            .map(parse_hex)
             .transpose()?;
 
         let value2 = parts
             .next()
             .filter(|s| !s.is_empty())
-            .map(|s| parse_hex(s))
+            .map(parse_hex)
             .transpose()?;
 
         Ok(Event {
