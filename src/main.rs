@@ -1,8 +1,10 @@
 use std::fs::File;
 
-use ctxp::{BinaryEncoder, Encode, Event, EventKind, Source, TextEncoder};
+use ctxp::{
+    BinaryEncoder, Decode, Encode, Event, EventKind, Source, TextDecoder, TextEncoder, error,
+};
 
-fn main() {
+fn main() -> error::Result<()> {
     let sources = vec![
         Source {
             id: 0,
@@ -70,4 +72,38 @@ fn main() {
         bin.write_event(event).unwrap();
     }
     bin.flush().unwrap();
+
+    // transcode: parse the text file and re-encode as binary
+    let dec = TextDecoder::new(File::open("trace.ctxp-txt")?)?;
+    let mut bin_transcoded =
+        BinaryEncoder::new(File::create("trace.ctxp-transcoded")?, dec.sources())?;
+    for event in dec {
+        bin_transcoded.write_event(&event?)?;
+    }
+    bin_transcoded.flush()?;
+
+    // compare the two binary files
+    let direct = std::fs::read("trace.ctxp")?;
+    let transcoded = std::fs::read("trace.ctxp-transcoded")?;
+
+    if direct == transcoded {
+        println!("OK: direct and transcoded binary outputs are identical");
+    } else {
+        eprintln!("MISMATCH: outputs differ");
+        eprintln!("  direct:     {} bytes", direct.len());
+        eprintln!("  transcoded: {} bytes", transcoded.len());
+
+        // print first differing byte for quick diagnosis
+        for (i, (a, b)) in direct.iter().zip(transcoded.iter()).enumerate() {
+            if a != b {
+                eprintln!(
+                    "  first difference at byte {:#06x}: {:#04x} vs {:#04x}",
+                    i, a, b
+                );
+                break;
+            }
+        }
+    }
+
+    Ok(())
 }

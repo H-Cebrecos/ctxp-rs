@@ -1,7 +1,8 @@
 use std::io::{BufWriter, Result, Write};
 
-use crate::{Encode, Event, EventKind, Source};
+use crate::{Encode, Event, EventKind, Source, error};
 
+#[derive(Debug)]
 pub struct BinaryEncoder<W: Write> {
     writer: BufWriter<W>,
 }
@@ -50,7 +51,7 @@ impl<W: Write> BinaryEncoder<W> {
 }
 
 impl<W: Write> Encode for BinaryEncoder<W> {
-    fn write_event(&mut self, event: &Event) -> Result<()> {
+    fn write_event(&mut self, event: &Event) -> error::Result<()> {
         let type_byte = encode_type_byte(&event.kind, event.cycle.is_some())?;
         let v1 = event.value1.unwrap_or(0);
         let v2 = event.value2.unwrap_or(0);
@@ -66,7 +67,7 @@ impl<W: Write> Encode for BinaryEncoder<W> {
         Ok(())
     }
 
-    fn flush(&mut self) -> Result<()> {
+    fn flush(&mut self) -> error::Result<()> {
         self.writer.flush()?;
         Ok(())
     }

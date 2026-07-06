@@ -1,13 +1,14 @@
-use std::io::{BufWriter, Result, Write};
+use std::io::{BufWriter, Write};
 
-use crate::{Encode, Event, Source};
+use crate::{Encode, Event, Source, error};
 
+#[derive(Debug)]
 pub struct TextEncoder<W: Write> {
     writer: BufWriter<W>,
 }
 
 impl<W: Write> TextEncoder<W> {
-    pub fn new(writer: W, sources: &[Source]) -> Result<Self> {
+    pub fn new(writer: W, sources: &[Source]) -> error::Result<Self> {
         let mut enc = Self {
             writer: BufWriter::new(writer),
         };
@@ -16,12 +17,12 @@ impl<W: Write> TextEncoder<W> {
         Ok(enc)
     }
 
-    fn write_header(&mut self) -> Result<()> {
+    fn write_header(&mut self) -> error::Result<()> {
         writeln!(self.writer, "HDR:format=accemic//ctxp-txt,ver=1")?;
         Ok(())
     }
 
-    fn write_metadata(&mut self, sources: &[Source]) -> Result<()> {
+    fn write_metadata(&mut self, sources: &[Source]) -> error::Result<()> {
         write!(self.writer, "META:")?;
         for (i, source) in sources.iter().enumerate() {
             if i > 0 {
@@ -36,12 +37,12 @@ impl<W: Write> TextEncoder<W> {
 }
 
 impl<W: Write> Encode for TextEncoder<W> {
-    fn write_event(&mut self, event: &Event) -> Result<()> {
+    fn write_event(&mut self, event: &Event) -> error::Result<()> {
         writeln!(self.writer, "{}", event)?;
         Ok(())
     }
 
-    fn flush(&mut self) -> Result<()> {
+    fn flush(&mut self) -> error::Result<()> {
         self.writer.flush()?;
         Ok(())
     }
