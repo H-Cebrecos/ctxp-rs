@@ -1,69 +1,37 @@
-use std::io::{BufWriter, Result, Write};
+use std::{
+    cell::RefCell,
+    io::{BufWriter, Write},
+    rc::Rc,
+};
 
-use crate::{Encode, Event, EventKind, Source, error};
+use crate::{AccessWidth, Encode, Event, EventKind, InfoKind, Source, error, pack_counter};
 
-#[derive(Debug)]
-pub struct BinaryEncoder<W: Write> {
+struct Inner<W: Write> {
     writer: BufWriter<W>,
+    sources: Vec<Source>,
 }
 
-impl<W: Write> BinaryEncoder<W> {
-    pub fn new(writer: W, sources: &[Source]) -> Result<Self> {
-        let mut enc = Self {
-            writer: BufWriter::new(writer),
-        };
-        enc.write_header()?;
-        enc.write_metadata(sources)?;
-        Ok(enc)
-    }
-
-    fn write_header(&mut self) -> Result<()> {
-        const HEADER_SIZE: u16 = 8;
-        const VERSION: u16 = 8;
-        self.writer.write_all(b"CTXP")?;
-        self.writer.write_all(&HEADER_SIZE.to_le_bytes())?;
-        self.writer.write_all(&VERSION.to_le_bytes())?;
-        Ok(())
-    }
-
-    //TODO: check
-    fn write_metadata(&mut self, sources: &[Source]) -> Result<()> {
-        // pre-compute total section length
-        // 2 (SectionType) + 2 (SectionLength) + sum of (1 + 1 + name.len()) per source
-        let payload_size: usize = sources.iter().map(|s| 1 + 1 + s.name.len()).sum();
-        let section_length = 2 + 2 + payload_size;
-
-        // header
-        self.writer.write_all(&0x0001u16.to_le_bytes())?; // SectionType
-        self.writer
-            .write_all(&(section_length as u16).to_le_bytes())?; // SectionLength
-
-        // entries
-        for source in sources {
-            let name = source.name.as_bytes(); // already UTF-8
-            self.writer.write_all(&[source.id])?; // SourceId
-            self.writer.write_all(&[name.len() as u8])?; // NameLen
-            self.writer.write_all(name)?; // Name
+impl<W: Write> Inner<W> {
+    fn write_event(
+        &mut self,
+        source_id: u8,
+        kind: EventKind,
+        cycle: Option<u64>,
+    ) -> error::Result<()> {
+        if !self.sources.iter().any(|s| s.id == source_id) {
+            return Err(error::Error::UnknownSource(source_id));
         }
 
-        Ok(())
-    }
-}
+        let (type_byte, v1, v2) = encode_event_payload(&kind, cycle.is_some());
+        let cycle_bytes: u64 = cycle.unwrap_or(0);
 
-impl<W: Write> Encode for BinaryEncoder<W> {
-    fn write_event(&mut self, event: &Event) -> error::Result<()> {
-        let type_byte = encode_type_byte(&event.kind, event.cycle.is_some())?;
-        let v1 = event.value1.unwrap_or(0);
-        let v2 = event.value2.unwrap_or(0);
-        let cycle = event.cycle.unwrap_or(0);
-
-        self.writer.write_all(&[event.source_id])?;
+        self.writer.write_all(&[source_id])?;
         self.writer.write_all(&[type_byte])?;
-        self.writer.write_all(&v1.to_le_bytes())?; // 8 bytes
-        self.writer.write_all(&v2.to_le_bytes())?; // 8 bytes
-        self.writer.write_all(&cycle.to_le_bytes())?; // 8 bytes
-        // total: 1 + 1 + 8 + 8 + 8 = 26 bytes ✓
-        //TODO: proper assert here.
+        self.writer.write_all(&v1.to_le_bytes())?;
+        self.writer.write_all(&v2.to_le_bytes())?;
+        self.writer.write_all(&cycle_bytes.to_le_bytes())?;
+        // total: 1 + 1 + 8 + 8 + 8 = 26 bytes
+
         Ok(())
     }
 
@@ -71,47 +39,192 @@ impl<W: Write> Encode for BinaryEncoder<W> {
         self.writer.flush()?;
         Ok(())
     }
+
+    fn write_header(&mut self) -> error::Result<()> {
+        const HEADER_SIZE: u16 = 8;
+        const VERSION: u16 = 1;
+        self.writer.write_all(b"CTXP")?;
+        self.writer.write_all(&HEADER_SIZE.to_le_bytes())?;
+        self.writer.write_all(&VERSION.to_le_bytes())?;
+        Ok(())
+    }
+
+    fn write_metadata(&mut self) -> error::Result<()> {
+        let payload_size: usize = self.sources.iter().map(|s| 1 + 1 + s.name.len()).sum();
+        let section_length = 2 + 2 + payload_size;
+
+        self.writer.write_all(&0x0001u16.to_le_bytes())?; // SectionType
+        self.writer
+            .write_all(&(section_length as u16).to_le_bytes())?; // SectionLength
+
+        for source in &self.sources {
+            let name = source.name.as_bytes();
+            self.writer.write_all(&[source.id])?;
+            self.writer.write_all(&[name.len() as u8])?;
+            self.writer.write_all(name)?;
+        }
+
+        Ok(())
+    }
 }
 
-fn encode_type_byte(kind: &EventKind, with_timestamp: bool) -> Result<u8> {
-    let base: u8 = match kind {
-        EventKind::Sync => 0b0000_0000,
-        EventKind::BranchTaken => 0b0001_0001,
-        EventKind::BranchNotTaken => 0b0001_0010,
-        EventKind::Interrupt => 0b0001_0011,
-        EventKind::Rfi => 0b0001_0101,
-        EventKind::Call => 0b0001_0110,
-        EventKind::Return => 0b0001_0111,
-        EventKind::MemWrite(n) => match n {
-            0 => 0b0010_0000,
-            1 => 0b0010_0001,
-            2 => 0b0010_0010,
-            4 => 0b0010_0100,
-            8 => 0b0010_1000,
-            _ => todo!("handle weird sizes"),
-        },
-        EventKind::MemRead(n) => match n {
-            0 => 0b0011_0000,
-            1 => 0b0011_0001,
-            2 => 0b0011_0010,
-            4 => 0b0011_0100,
-            8 => 0b0011_1000,
-            _ => todo!("handle weird sizes"),
-        },
-        EventKind::Overflow => 0b0101_1111,
-        EventKind::Context => 0b0100_0000,
-        EventKind::WallClock => 0b0100_0001,
-        EventKind::Data => 0b0110_0000,
-        EventKind::Counter => 0b0110_0001,
-        EventKind::LastPC => 0b0110_0010,
-        EventKind::Info(n) => match n {
-            1 => 0b0111_0000,
-            2 => 0b0111_0001,
-            3 => 0b0111_0010,
-            _ => todo!("handle weird sizes"),
-        },
+/// A streaming encoder for the CTXP binary format (`.ctxp`).
+///
+/// Wraps any [`Write`] sink and emits tightly packed 26-byte event records.
+/// Sources are declared at construction and fixed for the encoder's
+/// lifetime — the encoder is ready to accept events immediately.
+///
+/// Cheaply cloneable: cloning shares the same underlying writer and source
+/// list, so multiple [`SourceHandle`]s (or clones of the encoder itself)
+/// can coexist and write concurrently in a single-threaded context.
+///
+/// Buffers output internally — call [`Encode::flush`] when done to ensure
+/// all data reaches the underlying writer.
+#[derive(Clone)]
+pub struct BinaryEncoder<W: Write> {
+    inner: Rc<RefCell<Inner<W>>>,
+}
+
+impl<W: Write> BinaryEncoder<W> {
+    /// Declares `sources` and writes the header and metadata immediately.
+    /// The encoder is ready to accept events as soon as this returns.
+    pub fn new(writer: W, sources: &[Source]) -> error::Result<Self> {
+        let mut inner = Inner {
+            writer: BufWriter::new(writer),
+            sources: sources.to_vec(),
+        };
+        inner.write_header()?;
+        inner.write_metadata()?;
+        Ok(Self {
+            inner: Rc::new(RefCell::new(inner)),
+        })
+    }
+
+    /// Returns a handle scoped to `source_id`, which stamps every event
+    /// written through it automatically.
+    ///
+    /// Returns [`Error::UnknownSource`] if `source_id` was not declared
+    /// at construction.
+    pub fn source(&self, source_id: u8) -> error::Result<SourceHandle<W>> {
+        if !self
+            .inner
+            .borrow()
+            .sources
+            .iter()
+            .any(|s| s.id == source_id)
+        {
+            return Err(error::Error::UnknownSource(source_id));
+        }
+        Ok(SourceHandle {
+            inner: Rc::clone(&self.inner),
+            source_id,
+        })
+    }
+}
+
+impl<W: Write> Encode for BinaryEncoder<W> {
+    fn write_event(&self, event: &Event) -> error::Result<()> {
+        self.inner
+            .borrow_mut()
+            .write_event(event.source_id, event.kind.clone(), event.cycle)
+    }
+
+    fn flush(&self) -> error::Result<()> {
+        self.inner.borrow_mut().flush()
+    }
+}
+
+/// A handle scoped to one source, obtained via [`BinaryEncoder::source`].
+/// Stamps every event with its source id automatically — the caller
+/// never needs to specify it.
+#[derive(Clone)]
+pub struct SourceHandle<W: Write> {
+    inner: Rc<RefCell<Inner<W>>>,
+    source_id: u8,
+}
+
+impl<W: Write> SourceHandle<W> {
+    pub fn write_event(&self, kind: EventKind, cycle: Option<u64>) -> error::Result<()> {
+        self.inner
+            .borrow_mut()
+            .write_event(self.source_id, kind, cycle)
+    }
+
+    /// Encodes all events produced by `events`. Stops on the first error.
+    pub fn write_events(
+        &self,
+        events: impl IntoIterator<Item = (EventKind, Option<u64>)>,
+    ) -> error::Result<()> {
+        let mut inner = self.inner.borrow_mut();
+        for (kind, cycle) in events {
+            inner.write_event(self.source_id, kind, cycle)?;
+        }
+        Ok(())
+    }
+}
+
+fn encode_event_payload(kind: &EventKind, with_timestamp: bool) -> (u8, u64, u64) {
+    let (base, v1, v2) = match kind {
+        EventKind::Sync { target } => (0b000_0000u8, 0u64, *target),
+        EventKind::Interrupt { origin, target } => (0b001_0011, *origin, *target),
+        EventKind::Rfi { origin, target } => (0b001_0101, *origin, *target),
+        EventKind::BranchTaken { origin, target } => (0b001_0001, *origin, *target),
+        EventKind::BranchNotTaken { origin, target } => (0b001_0010, *origin, *target),
+        EventKind::Call { origin, target } => (0b001_0110, *origin, *target),
+        EventKind::Return { origin, target } => (0b001_0111, *origin, *target),
+
+        EventKind::MemReadUnknownData { addr } => (0b011_0000, *addr, 0),
+        EventKind::MemRead { width, addr, value } => (
+            match width {
+                AccessWidth::W1 => 0b011_0001,
+                AccessWidth::W2 => 0b011_0010,
+                AccessWidth::W4 => 0b011_0100,
+                AccessWidth::W8 => 0b011_1000,
+            },
+            addr.unwrap_or(u64::MAX),
+            *value,
+        ),
+
+        EventKind::MemWriteUnknownData { addr } => (0b010_0000, *addr, 0),
+        EventKind::MemWrite { width, addr, value } => (
+            match width {
+                AccessWidth::W1 => 0b010_0001,
+                AccessWidth::W2 => 0b010_0010,
+                AccessWidth::W4 => 0b010_0100,
+                AccessWidth::W8 => 0b010_1000,
+            },
+            addr.unwrap_or(u64::MAX),
+            *value,
+        ),
+
+        EventKind::Overflow => (0b101_1111, 0, 0),
+        EventKind::Context { value } => (0b100_0000, 0, *value),
+        EventKind::WallClock { value } => (0b100_0001, 0, *value),
+
+        EventKind::Info {
+            kind,
+            value1,
+            value2,
+        } => (
+            match kind {
+                InfoKind::I1 => 0b111_0000,
+                InfoKind::I2 => 0b111_0001,
+                InfoKind::I3 => 0b111_0010,
+            },
+            *value1,
+            *value2,
+        ),
+
+        EventKind::Data { tag } => (0b110_0000, 0, *tag),
+        EventKind::Counter {
+            count,
+            kind,
+            region,
+            tag,
+        } => (0b110_0001, *count, pack_counter(kind, *region, *tag)),
+        EventKind::LastPC { prev_pc } => (0b110_0010, 0, *prev_pc),
     };
 
-    // MSB set if cycle is present
-    Ok(if with_timestamp { base | 0x80 } else { base })
+    let event_type = if with_timestamp { base | 0x80 } else { base };
+    (event_type, v1, v2)
 }

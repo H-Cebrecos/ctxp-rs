@@ -1,5 +1,8 @@
+//! TODO: document this.
+
 use thiserror::Error;
 
+#[non_exhaustive]
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("I/O error: {0}")]
@@ -19,6 +22,16 @@ pub enum Error {
 
     #[error("invalid number: {0}")]
     InvalidNumber(#[from] std::num::ParseIntError),
+
+    #[error("unknown source id: {0}")]
+    UnknownSource(u8),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
+
+impl Error {
+    pub fn is_eof(&self) -> bool {
+        matches!(self, Error::Io(e) if e.kind() == std::io::ErrorKind::UnexpectedEof
+                                    || e.kind() == std::io::ErrorKind::Interrupted)
+    }
+}

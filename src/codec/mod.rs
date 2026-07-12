@@ -1,215 +1,112 @@
-use std::fmt;
-
-use std::str::FromStr;
-
-pub mod binary;
-pub mod text;
+mod binary;
+mod text;
 
 pub use binary::*;
 pub use text::*;
 
-use crate::error;
+use std::{collections::HashMap, iter::FusedIterator};
 
+use crate::Event;
+
+/// Encodes [`Event`]s to an output stream.
+///
+/// Implemented by [`TextEncoder`] and [`BinaryEncoder`]. Useful for writing
+/// code that is generic over the wire format, such as transcoding between
+/// formats.
 pub trait Encode {
-    fn write_event(&mut self, event: &Event) -> error::Result<()>;
+    /// Encodes a single event.
+    fn write_event(&self, event: &Event) -> crate::Result<()>;
 
-    fn write_events<'a>(
-        &mut self,
-        events: impl IntoIterator<Item = &'a Event>,
-    ) -> error::Result<()> {
+    /// Encodes all events produced by `events`, flushing after the last one.
+    fn write_events(&self, events: &mut dyn Iterator<Item = &Event>) -> crate::Result<()> {
         for event in events {
             self.write_event(event)?;
         }
+        self.flush()?;
         Ok(())
     }
 
-    fn flush(&mut self) -> error::Result<()>;
+    /// Flushes any buffered output to the underlying writer.
+    fn flush(&self) -> crate::Result<()>;
 }
 
-#[derive(Debug)]
-pub struct Source {
-    pub id: u8,
-    pub name: String,
-}
+/// Decodes [`Event`]s from an input stream.
+///
+/// Implementations are [`FusedIterator`]s over `Result<Event>`. Once a decoder
+/// reaches end-of-stream and returns `None`, it is guaranteed to never produce
+/// another event.
+///
+/// The decoder also exposes the list of event sources parsed from the stream
+/// metadata, available immediately after construction.
+pub trait Decode: FusedIterator<Item = crate::Result<Event>> {
+    /// Returns the event sources described by the stream metadata.
+    fn sources(&self) -> &[crate::Source];
 
-#[derive(Debug)]
-pub enum EventKind {
-    // Control Flow
-    Sync,
-    Interrupt,
-    Rfi,
-    BranchTaken,
-    BranchNotTaken,
-    Call,
-    Return,
-
-    // Data
-    MemRead(u8),
-    MemWrite(u8),
-
-    // Miscellaneous
-    Overflow,
-    Context,
-    WallClock,
-    Info(u8),
-
-    // DAQ/Instrumentation
-    Data,
-    Counter,
-    LastPC,
-}
-
-//TODO: were do we validate that the numbers are in range?
-impl fmt::Display for EventKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Sync => write!(f, "SYNC"),
-            Self::BranchTaken => write!(f, "BRANCH_TAKEN"),
-            Self::BranchNotTaken => write!(f, "BRANCH_NOTTAKEN"),
-            Self::Call => write!(f, "CALL"),
-            Self::Return => write!(f, "RETURN"),
-            Self::Interrupt => write!(f, "INTERRUPT"),
-            Self::Rfi => write!(f, "RFI"),
-            Self::MemWrite(n) => write!(f, "MEMWRITE_{}", n),
-            Self::MemRead(n) => write!(f, "MEMREAD_{}", n),
-            Self::Overflow => write!(f, "OVERFLOW"),
-            Self::Context => write!(f, "CONTEXT"),
-            Self::WallClock => write!(f, "WALLCLOCK"),
-            Self::Info(n) => write!(f, "INFO_{}", n),
-            Self::Data => write!(f, "DAQ_DATA"),
-            Self::Counter => write!(f, "DAQ_COUNTER"),
-            Self::LastPC => write!(f, "DAQ_LAST_PC"),
+    fn demux<'a>(self) -> Demux<'a, Self>
+    where
+        Self: Sized,
+    {
+        Demux {
+            decoder: self,
+            handlers: HashMap::new(),
+            unknown: None,
         }
     }
 }
 
-//TODO
-impl FromStr for EventKind {
-    type Err = crate::error::Error;
+/// A push-based demultiplexer for decoded CTXP event streams.
+///
+/// Dispatches events to per-source handlers as they arrive from the
+/// underlying decoder, processing the stream in a single pass with no
+/// internal buffering.
+///
+/// # Why push and not pull
+///
+/// A pull-based API (independent iterator per source) would require
+/// buffering an arbitrary number of events for sources that are not
+/// being consumed, since the underlying stream is interleaved. For
+/// long traces with many sources this could exhaust memory. The push
+/// model avoids this entirely — each event is dispatched and dropped
+/// immediately, keeping memory usage constant regardless of trace
+/// length or source count.
+pub struct Demux<'a, D: Decode> {
+    decoder: D,
+    handlers: HashMap<u8, Box<dyn FnMut(&Event) -> crate::Result<()> + 'a>>,
+    unknown: Option<Box<dyn FnMut(&Event) -> crate::Result<()> + 'a>>,
+}
 
-    fn from_str(s: &str) -> error::Result<Self> {
-        // handle the parametric variants first since they need prefix matching
-        if let Some(n) = s.strip_prefix("MEMREAD_") {
-            return Ok(Self::MemRead(n.parse()?));
-        }
-        if let Some(n) = s.strip_prefix("MEMWRITE_") {
-            return Ok(Self::MemWrite(n.parse()?));
-        }
-        if let Some(n) = s.strip_prefix("INFO_") {
-            return Ok(Self::Info(n.parse()?));
-        }
-
-        match s {
-            "SYNC" => Ok(Self::Sync),
-            "INTERRUPT" => Ok(Self::Interrupt),
-            "RFI" => Ok(Self::Rfi),
-            "BRANCH_TAKEN" => Ok(Self::BranchTaken),
-            "BRANCH_NOTTAKEN" => Ok(Self::BranchNotTaken),
-            "CALL" => Ok(Self::Call),
-            "RETURN" => Ok(Self::Return),
-            "OVERFLOW" => Ok(Self::Overflow),
-            "CONTEXT" => Ok(Self::Context),
-            "WALLCLOCK" => Ok(Self::WallClock),
-            "DAQ_DATA" => Ok(Self::Data),
-            "DAQ_COUNTER" => Ok(Self::Counter),
-            "DAQ_LAST_PC" => Ok(Self::LastPC),
-            _ => Err(error::Error::UnknownEventKind(s.to_string())),
-        }
+impl<'a, D: Decode> Demux<'a, D> {
+    pub fn on_source(
+        mut self,
+        source_id: u8,
+        handler: impl FnMut(&Event) -> crate::Result<()> + 'a,
+    ) -> Self {
+        self.handlers.insert(source_id, Box::new(handler));
+        self
     }
-}
 
-#[derive(Debug)]
-pub struct Event {
-    pub source_id: u8,
-    pub kind: EventKind,
-    pub value1: Option<u64>,
-    pub value2: Option<u64>,
-    pub cycle: Option<u64>,
-}
+    /// Handler for events whose source id has no registered handler.
+    /// If not set, unregistered events are silently skipped.
+    pub fn on_unknown(mut self, handler: impl FnMut(&Event) -> crate::Result<()> + 'a) -> Self {
+        self.unknown = Some(Box::new(handler));
+        self
+    }
 
-//TODO: check
-impl fmt::Display for Event {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{:<50} {}",
-            format!(
-                "#{}:{}:{}:{}",
-                self.source_id,
-                self.kind,
-                self.value1.map(|v| format!("{:#x}", v)).unwrap_or_default(),
-                self.value2.map(|v| format!("{:#x}", v)).unwrap_or_default(),
-            ),
-            self.cycle.map(|v| format!("@ {}", v)).unwrap_or_default(),
-        )?;
+    /// Consumes the decoder, dispatching each event to the appropriate
+    /// handler. Stops and returns on the first error, whether from the
+    /// decoder or a handler.
+    pub fn run(mut self) -> crate::Result<()> {
+        for event in self.decoder {
+            let event = event?;
+            match self.handlers.get_mut(&event.source_id) {
+                Some(handler) => handler(&event)?,
+                None => {
+                    if let Some(ref mut h) = self.unknown {
+                        h(&event)?;
+                    }
+                }
+            }
+        }
         Ok(())
     }
-}
-
-//TODO: check
-impl FromStr for Event {
-    type Err = error::Error;
-
-    fn from_str(s: &str) -> error::Result<Self> {
-        // strip leading '#'
-        let s = s
-            .strip_prefix('#')
-            .ok_or_else(|| error::Error::Parse("expected '#'".into()))?;
-
-        // split into the event part and optional cycle part
-        let (event_part, cycle) = match s.split_once(" @ ") {
-            Some((e, c)) => (
-                e,
-                Some(
-                    c.trim()
-                        .parse::<u64>()
-                        .map_err(|_| error::Error::Parse("invalid cycle count".into()))?,
-                ),
-            ),
-            None => (s, None),
-        };
-
-        // split event part into fields
-        let mut parts = event_part.splitn(4, ':');
-        let source_id = parts
-            .next()
-            .ok_or_else(|| error::Error::Parse("missing source_id".into()))?
-            .parse::<u8>()
-            .map_err(|_| error::Error::Parse("invalid source_id".into()))?;
-
-        let kind = parts
-            .next()
-            .ok_or_else(|| error::Error::Parse("missing event kind".into()))?
-            .parse::<EventKind>()?;
-
-        let value1 = parts
-            .next()
-            .filter(|s| !s.is_empty())
-            .map(parse_hex)
-            .transpose()?;
-
-        let value2 = parts
-            .next()
-            .filter(|s| !s.is_empty())
-            .map(parse_hex)
-            .transpose()?;
-
-        Ok(Event {
-            source_id,
-            kind,
-            value1,
-            value2,
-            cycle,
-        })
-    }
-}
-
-fn parse_hex(s: &str) -> error::Result<u64> {
-    let s = s.trim().strip_prefix("0x").unwrap_or(s);
-    u64::from_str_radix(s, 16)
-        .map_err(|_| error::Error::Parse(format!("invalid hex value: '{}'", s)))
-}
-
-pub trait Decode: Iterator<Item = error::Result<Event>> {
-    fn sources(&self) -> &[Source];
 }
