@@ -4,9 +4,12 @@ mod text;
 pub use binary::*;
 pub use text::*;
 
-use std::{collections::HashMap, iter::FusedIterator};
+use std::{
+    cell::RefCell, collections::HashMap, io::Write, iter::FusedIterator, marker::PhantomData,
+    rc::Rc,
+};
 
-use crate::Event;
+use crate::{Event, EventKind, Source};
 
 /// Encodes [`Event`]s to an output stream.
 ///
@@ -106,6 +109,63 @@ impl<'a, D: Decode> Demux<'a, D> {
                     }
                 }
             }
+        }
+        Ok(())
+    }
+}
+
+pub struct BinaryEncoderTag;
+pub struct TextEncoderTag;
+
+struct Inner<W: Write, M> {
+    writer: std::io::BufWriter<W>,
+    sources: Vec<Source>,
+    _marker: PhantomData<M>,
+}
+
+/// A handle scoped to one source, obtained via [`BinaryEncoder::source`].
+/// Stamps every event with its source id automatically — the caller
+/// never needs to specify it.
+#[derive(Clone)]
+pub struct SourceHandle<W: Write, M> {
+    inner: Rc<RefCell<Inner<W, M>>>,
+    source_id: u8,
+}
+
+impl<W: Write> SourceHandle<W, BinaryEncoderTag> {
+    pub fn write_event(&self, kind: EventKind, cycle: Option<u64>) -> crate::Result<()> {
+        self.inner
+            .borrow_mut()
+            .write_event(self.source_id, kind, cycle)
+    }
+
+    /// Encodes all events produced by `events`. Stops on the first error.
+    pub fn write_events(
+        &self,
+        events: impl IntoIterator<Item = (EventKind, Option<u64>)>,
+    ) -> crate::Result<()> {
+        let mut inner = self.inner.borrow_mut();
+        for (kind, cycle) in events {
+            inner.write_event(self.source_id, kind, cycle)?;
+        }
+        Ok(())
+    }
+}
+impl<W: Write> SourceHandle<W, TextEncoderTag> {
+    pub fn write_event(&self, kind: EventKind, cycle: Option<u64>) -> crate::Result<()> {
+        self.inner
+            .borrow_mut()
+            .write_event(self.source_id, kind, cycle)
+    }
+
+    /// Encodes all events produced by `events`. Stops on the first error.
+    pub fn write_events(
+        &self,
+        events: impl IntoIterator<Item = (EventKind, Option<u64>)>,
+    ) -> crate::Result<()> {
+        let mut inner = self.inner.borrow_mut();
+        for (kind, cycle) in events {
+            inner.write_event(self.source_id, kind, cycle)?;
         }
         Ok(())
     }

@@ -1,18 +1,17 @@
 use std::{
     cell::RefCell,
     io::{BufWriter, Write},
+    marker::PhantomData,
     rc::Rc,
 };
 
-use crate::{AccessWidth, Encode, Event, EventKind, InfoKind, Source, error, pack_counter};
+use crate::{
+    AccessWidth, BinaryEncoderTag, Encode, Event, EventKind, InfoKind, Source, SourceHandle,
+    codec::Inner, error, pack_counter,
+};
 
-struct Inner<W: Write> {
-    writer: BufWriter<W>,
-    sources: Vec<Source>,
-}
-
-impl<W: Write> Inner<W> {
-    fn write_event(
+impl<W: Write> Inner<W, BinaryEncoderTag> {
+    pub fn write_event(
         &mut self,
         source_id: u8,
         kind: EventKind,
@@ -35,7 +34,7 @@ impl<W: Write> Inner<W> {
         Ok(())
     }
 
-    fn flush(&mut self) -> error::Result<()> {
+    pub fn flush(&mut self) -> error::Result<()> {
         self.writer.flush()?;
         Ok(())
     }
@@ -82,7 +81,7 @@ impl<W: Write> Inner<W> {
 /// all data reaches the underlying writer.
 #[derive(Clone)]
 pub struct BinaryEncoder<W: Write> {
-    inner: Rc<RefCell<Inner<W>>>,
+    inner: Rc<RefCell<Inner<W, BinaryEncoderTag>>>,
 }
 
 impl<W: Write> BinaryEncoder<W> {
@@ -92,6 +91,7 @@ impl<W: Write> BinaryEncoder<W> {
         let mut inner = Inner {
             writer: BufWriter::new(writer),
             sources: sources.to_vec(),
+            _marker: PhantomData,
         };
         inner.write_header()?;
         inner.write_metadata()?;
@@ -105,7 +105,7 @@ impl<W: Write> BinaryEncoder<W> {
     ///
     /// Returns [`Error::UnknownSource`] if `source_id` was not declared
     /// at construction.
-    pub fn source(&self, source_id: u8) -> error::Result<SourceHandle<W>> {
+    pub fn source(&self, source_id: u8) -> error::Result<SourceHandle<W, BinaryEncoderTag>> {
         if !self
             .inner
             .borrow()
@@ -131,35 +131,6 @@ impl<W: Write> Encode for BinaryEncoder<W> {
 
     fn flush(&self) -> error::Result<()> {
         self.inner.borrow_mut().flush()
-    }
-}
-
-/// A handle scoped to one source, obtained via [`BinaryEncoder::source`].
-/// Stamps every event with its source id automatically — the caller
-/// never needs to specify it.
-#[derive(Clone)]
-pub struct SourceHandle<W: Write> {
-    inner: Rc<RefCell<Inner<W>>>,
-    source_id: u8,
-}
-
-impl<W: Write> SourceHandle<W> {
-    pub fn write_event(&self, kind: EventKind, cycle: Option<u64>) -> error::Result<()> {
-        self.inner
-            .borrow_mut()
-            .write_event(self.source_id, kind, cycle)
-    }
-
-    /// Encodes all events produced by `events`. Stops on the first error.
-    pub fn write_events(
-        &self,
-        events: impl IntoIterator<Item = (EventKind, Option<u64>)>,
-    ) -> error::Result<()> {
-        let mut inner = self.inner.borrow_mut();
-        for (kind, cycle) in events {
-            inner.write_event(self.source_id, kind, cycle)?;
-        }
-        Ok(())
     }
 }
 
