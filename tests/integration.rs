@@ -233,13 +233,10 @@ fn demux_reencodes_correctly() {
         let cpu0 = enc.source(0).unwrap();
         let cpu1 = enc.source(1).unwrap();
 
-        TextDecoder::new(direct.as_slice())
-            .unwrap()
-            .demux()
-            .on_source(0, |event| cpu0.write_event(event.kind.clone(), event.cycle))
-            .on_source(1, |event| cpu1.write_event(event.kind.clone(), event.cycle))
-            .run()
-            .unwrap();
+        let mut dmx = TextDecoder::new(direct.as_slice()).unwrap().demux();
+        dmx.on_source(0, |event| cpu0.write_event(event.kind.clone(), event.cycle));
+        dmx.on_source(1, |event| cpu1.write_event(event.kind.clone(), event.cycle));
+        dmx.run().unwrap();
 
         enc.flush().unwrap();
     }

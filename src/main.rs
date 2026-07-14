@@ -130,11 +130,10 @@ fn main() -> ctxp::Result<()> {
     let cpu0 = enc.source(0)?;
     let cpu1 = enc.source(1)?;
 
-    TextDecoder::new(File::open("trace.ctxp-txt")?)?
-        .demux()
-        .on_source(0, |event| cpu0.write_event(event.kind.clone(), event.cycle))
-        .on_source(1, |event| cpu1.write_event(event.kind.clone(), event.cycle))
-        .run()?;
+    let mut dmx = TextDecoder::new(File::open("trace.ctxp-txt")?)?.demux();
+    dmx.on_source(0, |event| cpu0.write_event(event.kind.clone(), event.cycle));
+    dmx.on_source(1, |event| cpu1.write_event(event.kind.clone(), event.cycle));
+    dmx.run()?;
 
     enc.flush()?;
 

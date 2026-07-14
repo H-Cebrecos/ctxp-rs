@@ -127,10 +127,10 @@
 //! let cpu0 = enc.source(0)?;
 //! let cpu1 = enc.source(1)?;
 //!
-//! BinaryDecoder::new(std::fs::File::open("trace.ctxp")?)?.demux()
-//!     .on_source(0, |event| cpu0.write_event(event.kind.clone(), event.cycle))
-//!     .on_source(1, |event| cpu1.write_event(event.kind.clone(), event.cycle))
-//!     .run()?;
+//! let mut dmx = BinaryDecoder::new(std::fs::File::open("trace.ctxp")?)?.demux();
+//!     dmx.on_source(0, |event| cpu0.write_event(event.kind.clone(), event.cycle));
+//!     dmx.on_source(1, |event| cpu1.write_event(event.kind.clone(), event.cycle));
+//!     dmx.run()?;
 //!
 //! enc.flush()?;
 //! # Ok::<(), ctxp::Error>(())

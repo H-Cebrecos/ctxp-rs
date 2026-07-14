@@ -80,10 +80,10 @@ pub struct Demux<'a, D: Decode> {
 
 impl<'a, D: Decode> Demux<'a, D> {
     pub fn on_source(
-        mut self,
+        &mut self,
         source_id: u8,
         handler: impl FnMut(&Event) -> crate::Result<()> + 'a,
-    ) -> Self {
+    ) -> &mut Self {
         self.handlers.insert(source_id, Box::new(handler));
         self
     }
