@@ -1,6 +1,9 @@
-use std::fs::File;
+use std::{fs::File, io::BufReader, path::Path};
 
-use ctxp::*;
+use ctxp::{
+    Format::{Binary, Text},
+    *,
+};
 
 fn main() -> ctxp::Result<()> {
     let sources = vec![
@@ -58,7 +61,7 @@ fn main() -> ctxp::Result<()> {
     ];
 
     // --- encode directly to both formats ---
-    let w = File::create("trace.ctxp-txt")?;
+    let w = File::create("trace.ctxp.txt")?;
     let txt = TextEncoder::new(w, &sources)?;
     for event in &events {
         txt.write_event(event)?;
@@ -72,7 +75,7 @@ fn main() -> ctxp::Result<()> {
     bin.flush()?;
 
     // --- transcode text -> binary ---
-    let dec = TextDecoder::new(File::open("trace.ctxp-txt")?)?;
+    let dec = Decoder::new(BufReader::new(File::open("trace.ctxp.txt")?), Text)?;
     let bin_transcoded = BinaryEncoder::new(File::create("trace.ctxp-transcoded")?, dec.sources())?;
     for event in dec {
         bin_transcoded.write_event(&event?)?;
@@ -86,7 +89,7 @@ fn main() -> ctxp::Result<()> {
     )?;
 
     // --- shared encoder example ---
-    let enc = TextEncoder::new(File::create("trace-shared.ctxp-txt")?, &sources)?;
+    let enc = TextEncoder::new(File::create("trace-shared.ctxp.txt")?, &sources)?;
 
     let cpu0 = enc.source(0)?;
     let cpu1 = enc.source(1)?;
@@ -121,16 +124,16 @@ fn main() -> ctxp::Result<()> {
 
     compare_files(
         "direct vs shared",
-        "trace.ctxp-txt",
-        "trace-shared.ctxp-txt",
+        "trace.ctxp.txt",
+        "trace-shared.ctxp.txt",
     )?;
 
     // --- demux and re-encode per source ---
-    let enc = TextEncoder::new(File::create("trace-reencoded.ctxp-txt")?, &sources)?;
+    let enc = TextEncoder::new(File::create("trace-reencoded.ctxp.txt")?, &sources)?;
     let cpu0 = enc.source(0)?;
     let cpu1 = enc.source(1)?;
 
-    let mut dmx = TextDecoder::new(File::open("trace.ctxp-txt")?)?.demux();
+    let mut dmx = Decoder::open(Path::new("trace.ctxp.txt"))?.demux();
     dmx.on_source(0, |event| cpu0.write_event(event.kind.clone(), event.cycle));
     dmx.on_source(1, |event| cpu1.write_event(event.kind.clone(), event.cycle));
     dmx.run()?;
@@ -139,11 +142,11 @@ fn main() -> ctxp::Result<()> {
 
     compare_files(
         "direct vs demux re-encoded",
-        "trace.ctxp-txt",
-        "trace-reencoded.ctxp-txt",
+        "trace.ctxp.txt",
+        "trace-reencoded.ctxp.txt",
     )?;
     // --- round-trip binary: decode binary, re-encode as binary ---
-    let bin_dec = BinaryDecoder::new(File::open("trace.ctxp")?)?;
+    let bin_dec = Decoder::new(BufReader::new(File::open("trace.ctxp")?), Binary)?;
     let bin_roundtrip =
         BinaryEncoder::new(File::create("trace.ctxp-roundtrip")?, bin_dec.sources())?;
     for event in bin_dec {
@@ -154,9 +157,9 @@ fn main() -> ctxp::Result<()> {
     compare_files("binary round-trip", "trace.ctxp", "trace.ctxp-roundtrip")?;
 
     // --- transcode binary -> text, compare with original text ---
-    let bin_dec2 = BinaryDecoder::new(File::open("trace.ctxp")?)?;
+    let bin_dec2 = Decoder::new(BufReader::new(File::open("trace.ctxp")?), Binary)?;
     let txt_from_bin =
-        TextEncoder::new(File::create("trace.ctxp-txt-from-bin")?, bin_dec2.sources())?;
+        TextEncoder::new(File::create("trace.ctxp.txt-from-bin")?, bin_dec2.sources())?;
     for event in bin_dec2 {
         txt_from_bin.write_event(&event?)?;
     }
@@ -164,8 +167,8 @@ fn main() -> ctxp::Result<()> {
 
     compare_files(
         "binary->text vs original text",
-        "trace.ctxp-txt",
-        "trace.ctxp-txt-from-bin",
+        "trace.ctxp.txt",
+        "trace.ctxp.txt-from-bin",
     )?;
 
     Ok(())

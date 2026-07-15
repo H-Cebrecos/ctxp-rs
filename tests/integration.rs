@@ -1,4 +1,7 @@
-use ctxp::*;
+use ctxp::{
+    Format::{Binary, Text},
+    *,
+};
 
 fn make_sources() -> Vec<Source> {
     vec![
@@ -85,7 +88,7 @@ fn text_encode_decode_roundtrip() {
         }
         enc.flush().unwrap();
     }
-    let dec = TextDecoder::new(buf.as_slice()).unwrap();
+    let dec = Decoder::new(buf.as_slice(), Text).unwrap();
     let decoded: Vec<Event> = dec.map(|e| e.unwrap()).collect();
 
     assert_eq!(events, decoded);
@@ -104,7 +107,7 @@ fn binary_encode_decode_roundtrip() {
         }
         enc.flush().unwrap();
     }
-    let dec = BinaryDecoder::new(buf.as_slice()).unwrap();
+    let dec = Decoder::new(buf.as_slice(), Binary).unwrap();
     let decoded: Vec<Event> = dec.map(|e| e.unwrap()).collect();
 
     assert_eq!(events, decoded);
@@ -127,13 +130,13 @@ fn transcode_text_to_binary() {
     // encode to text then transcode to binary
     let mut txt_buf = Vec::new();
     {
-        let mut txt_enc = TextEncoder::new(&mut txt_buf, &sources).unwrap();
+        let txt_enc = TextEncoder::new(&mut txt_buf, &sources).unwrap();
         for event in &events {
             txt_enc.write_event(event).unwrap();
         }
         txt_enc.flush().unwrap();
     }
-    let dec = TextDecoder::new(txt_buf.as_slice()).unwrap();
+    let dec = Decoder::new(txt_buf.as_slice(), Text).unwrap();
     let mut transcoded = Vec::new();
     {
         let bin_enc = BinaryEncoder::new(&mut transcoded, dec.sources()).unwrap();
@@ -168,7 +171,7 @@ fn transcode_binary_to_text() {
         }
         bin_enc.flush().unwrap();
     }
-    let dec = BinaryDecoder::new(bin_buf.as_slice()).unwrap();
+    let dec = Decoder::new(bin_buf.as_slice(), Format::Binary).unwrap();
     let mut transcoded_txt = Vec::new();
     {
         let txt_enc = TextEncoder::new(&mut transcoded_txt, dec.sources()).unwrap();
@@ -233,7 +236,7 @@ fn demux_reencodes_correctly() {
         let cpu0 = enc.source(0).unwrap();
         let cpu1 = enc.source(1).unwrap();
 
-        let mut dmx = TextDecoder::new(direct.as_slice()).unwrap().demux();
+        let mut dmx = Decoder::new(direct.as_slice(), Text).unwrap().demux();
         dmx.on_source(0, |event| cpu0.write_event(event.kind.clone(), event.cycle));
         dmx.on_source(1, |event| cpu1.write_event(event.kind.clone(), event.cycle));
         dmx.run().unwrap();

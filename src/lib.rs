@@ -96,9 +96,10 @@
 //! is passed straight to the new encoder:
 //!
 //! ```no_run
-//! use ctxp::{BinaryEncoder, Decode, Encode, TextDecoder};
+//! use ctxp::{BinaryEncoder, Decoder, Encode};
+//! use std::path::Path;
 //!
-//! let dec = TextDecoder::new(std::fs::File::open("trace.ctxp-txt")?)?;
+//! let dec = Decoder::open(Path::new("trace.ctxp.txt"))?;
 //! let enc = BinaryEncoder::new(std::fs::File::create("trace.ctxp")?, dec.sources())?;
 //!
 //! for event in dec {
@@ -116,7 +117,8 @@
 //! This is useful for splitting one trace into per-source outputs:
 //!
 //! ```no_run
-//! use ctxp::{BinaryDecoder, Encode, Decode, Source, TextEncoder};
+//! use ctxp::{Encode, Decoder, Source, TextEncoder};
+//! use std::path::Path;
 //!
 //! let sources = vec![
 //!     Source { id: 0, name: "CPU0".into() },
@@ -127,7 +129,7 @@
 //! let cpu0 = enc.source(0)?;
 //! let cpu1 = enc.source(1)?;
 //!
-//! let mut dmx = BinaryDecoder::new(std::fs::File::open("trace.ctxp")?)?.demux();
+//! let mut dmx = Decoder::open(Path::new("trace.ctxp.txt"))?.demux();
 //!     dmx.on_source(0, |event| cpu0.write_event(event.kind.clone(), event.cycle));
 //!     dmx.on_source(1, |event| cpu1.write_event(event.kind.clone(), event.cycle));
 //!     dmx.run()?;
@@ -154,9 +156,18 @@
 //! This library is under active development.
 
 mod codec;
+mod decoder;
+mod encoder;
 mod error;
 mod event;
 
 pub use codec::*;
+pub use decoder::*;
+
 pub use error::{Error, Result};
 pub use event::*;
+
+pub enum Format {
+    Binary,
+    Text,
+}

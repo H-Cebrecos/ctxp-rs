@@ -25,6 +25,11 @@ pub enum Error {
 
     #[error("unknown source id: {0}")]
     UnknownSource(u8),
+
+    #[error("Invalid file name")]
+    InvalidFileName,
+    #[error("Invalid file extension: {0}")]
+    InvalidFileExtension(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
