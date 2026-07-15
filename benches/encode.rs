@@ -1,6 +1,9 @@
 // benches/encode.rs
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
-use ctxp::*;
+use ctxp::{
+    Format::{Binary, Text},
+    *,
+};
 use rand::{Rng, SeedableRng, rngs::StdRng};
 
 // --- r#generators ---
@@ -194,7 +197,7 @@ fn bench_text_decoder(c: &mut Criterion) {
         group.throughput(Throughput::Elements(size));
         group.bench_with_input(BenchmarkId::from_parameter(size), &buf, |b, buf| {
             b.iter(|| {
-                let dec = TextDecoder::new(black_box(buf.as_slice())).unwrap();
+                let dec = Decoder::new(black_box(buf.as_slice()), Text).unwrap();
                 for event in dec {
                     black_box(event.unwrap());
                 }
@@ -226,7 +229,7 @@ fn bench_binary_decoder(c: &mut Criterion) {
         group.throughput(Throughput::Elements(size));
         group.bench_with_input(BenchmarkId::from_parameter(size), &buf, |b, buf| {
             b.iter(|| {
-                let dec = BinaryDecoder::new(black_box(buf.as_slice())).unwrap();
+                let dec = Decoder::new(black_box(buf.as_slice()), Binary).unwrap();
                 for event in dec {
                     black_box(event.unwrap());
                 }
@@ -258,7 +261,7 @@ fn bench_transcode_text_to_binary(c: &mut Criterion) {
         group.throughput(Throughput::Elements(size));
         group.bench_with_input(BenchmarkId::from_parameter(size), &txt_buf, |b, txt_buf| {
             b.iter(|| {
-                let dec = TextDecoder::new(black_box(txt_buf.as_slice())).unwrap();
+                let dec = Decoder::new(black_box(txt_buf.as_slice()), Text).unwrap();
                 let enc = BinaryEncoder::new(std::io::sink(), dec.sources()).unwrap();
                 for event in dec {
                     enc.write_event(&black_box(event.unwrap())).unwrap();
