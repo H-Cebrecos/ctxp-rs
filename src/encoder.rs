@@ -1,11 +1,10 @@
 use std::{
     cell::RefCell,
     io::{BufWriter, Write},
-    iter::Cycle,
     rc::Rc,
 };
 
-use crate::{AccessWidth, Event, EventKind, Format, InfoKind, Source, event, pack_counter};
+use crate::{AccessWidth, Event, EventKind, Format, InfoKind, Source, pack_counter};
 
 struct EncoderState<W: Write> {
     writer: RefCell<BufWriter<W>>,

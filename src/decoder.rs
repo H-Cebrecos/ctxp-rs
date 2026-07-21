@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     fs::File,
-    io::{BufRead, BufReader},
+    io::{BufRead, BufReader, Read},
     iter::FusedIterator,
     path::Path,
 };
@@ -317,15 +317,15 @@ impl<R: BufRead> DecoderState<R> {
 ///
 /// The decoder also exposes the list of event sources parsed from the stream
 /// metadata, available immediately after construction.
-pub struct Decoder<R: BufRead> {
+pub struct Decoder<R: Read> {
     format: Format,
-    state: DecoderState<R>,
+    state: DecoderState<BufReader<R>>,
 }
 
-impl<R: BufRead> Decoder<R> {
+impl<R: Read> Decoder<R> {
     pub fn new(reader: R, format: Format) -> crate::Result<Self> {
         let mut state = DecoderState {
-            reader: reader,
+            reader: BufReader::new(reader),
             sources: Vec::new(),
         };
 
@@ -357,9 +357,9 @@ impl<R: BufRead> Decoder<R> {
     }
 }
 
-impl Decoder<BufReader<File>> {
+impl Decoder<File> {
     pub fn open(path: &Path) -> crate::Result<Self> {
-        let file = BufReader::new(File::open(path)?);
+        let file = File::open(path)?;
         let format = Self::detect_format(path)?;
         Self::new(file, format)
     }
@@ -379,7 +379,7 @@ impl Decoder<BufReader<File>> {
     }
 }
 
-impl<R: BufRead> Iterator for Decoder<R> {
+impl<R: Read> Iterator for Decoder<R> {
     type Item = crate::Result<Event>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -401,7 +401,7 @@ impl<R: BufRead> Iterator for Decoder<R> {
     }
 }
 
-impl<R: BufRead> FusedIterator for Decoder<R> {}
+impl<R: Read> FusedIterator for Decoder<R> {}
 
 /// A push-based demultiplexer for decoded CTXP event streams.
 ///
@@ -418,13 +418,13 @@ impl<R: BufRead> FusedIterator for Decoder<R> {}
 /// model avoids this entirely — each event is dispatched and dropped
 /// immediately, keeping memory usage constant regardless of trace
 /// length or source count.
-pub struct Demux<'a, R: BufRead> {
+pub struct Demux<'a, R: Read> {
     dec: Decoder<R>,
     handlers: HashMap<u8, Box<dyn FnMut(Event) -> Result<(), Error> + 'a>>,
     on_unhandled: Option<Box<dyn FnMut(Event) -> Result<(), Error> + 'a>>,
 }
 
-impl<'a, R: BufRead> Demux<'a, R> {
+impl<'a, R: Read> Demux<'a, R> {
     pub fn on_source<F>(&mut self, id: u8, handler: F) -> &mut Self
     where
         F: FnMut(Event) -> Result<(), Error> + 'a,
