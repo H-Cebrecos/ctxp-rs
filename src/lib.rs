@@ -155,18 +155,19 @@
 //!
 //! This library is under active development.
 
-mod codec;
 mod decoder;
 mod encoder;
 mod error;
 mod event;
 
-pub use codec::*;
+// pub use codec::*;
 pub use decoder::*;
+pub use encoder::*;
 
 pub use error::{Error, Result};
 pub use event::*;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Format {
     Binary,
     Text,

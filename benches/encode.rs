@@ -144,7 +144,7 @@ fn bench_text_encoder(c: &mut Criterion) {
         group.throughput(Throughput::Elements(size));
         group.bench_with_input(BenchmarkId::from_parameter(size), &events, |b, events| {
             b.iter(|| {
-                let enc = TextEncoder::new(std::io::sink(), &sources).unwrap();
+                let enc = Encoder::new(std::io::sink(), &sources, Text).unwrap();
                 for event in events {
                     enc.write_event(black_box(event)).unwrap();
                 }
@@ -164,7 +164,7 @@ fn bench_binary_encoder(c: &mut Criterion) {
         group.throughput(Throughput::Elements(size));
         group.bench_with_input(BenchmarkId::from_parameter(size), &events, |b, events| {
             b.iter(|| {
-                let enc = BinaryEncoder::new(std::io::sink(), &sources).unwrap();
+                let enc = Encoder::new(std::io::sink(), &sources, Binary).unwrap();
                 for event in events {
                     enc.write_event(black_box(event)).unwrap();
                 }
@@ -185,7 +185,7 @@ fn bench_text_decoder(c: &mut Criterion) {
         let buf = {
             let mut buf = Vec::new();
             {
-                let enc = TextEncoder::new(&mut buf, &sources).unwrap();
+                let enc = Encoder::new(&mut buf, &sources, Text).unwrap();
                 for event in &events {
                     enc.write_event(event).unwrap();
                 }
@@ -217,7 +217,7 @@ fn bench_binary_decoder(c: &mut Criterion) {
         let buf = {
             let mut buf = Vec::new();
             {
-                let enc = BinaryEncoder::new(&mut buf, &sources).unwrap();
+                let enc = Encoder::new(&mut buf, &sources, Binary).unwrap();
                 for event in &events {
                     enc.write_event(event).unwrap();
                 }
@@ -249,7 +249,7 @@ fn bench_transcode_text_to_binary(c: &mut Criterion) {
         let txt_buf = {
             let mut buf = Vec::new();
             {
-                let enc = TextEncoder::new(&mut buf, &sources).unwrap();
+                let enc = Encoder::new(&mut buf, &sources, Text).unwrap();
                 for event in &events {
                     enc.write_event(event).unwrap();
                 }
@@ -262,7 +262,7 @@ fn bench_transcode_text_to_binary(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::from_parameter(size), &txt_buf, |b, txt_buf| {
             b.iter(|| {
                 let dec = Decoder::new(black_box(txt_buf.as_slice()), Text).unwrap();
-                let enc = BinaryEncoder::new(std::io::sink(), dec.sources()).unwrap();
+                let enc = Encoder::new(std::io::sink(), dec.sources(), Binary).unwrap();
                 for event in dec {
                     enc.write_event(&black_box(event.unwrap())).unwrap();
                 }

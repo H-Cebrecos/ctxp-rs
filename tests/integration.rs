@@ -82,7 +82,7 @@ fn text_encode_decode_roundtrip() {
 
     let mut buf = Vec::new();
     {
-        let enc = TextEncoder::new(&mut buf, &sources).unwrap();
+        let enc = Encoder::new(&mut buf, &sources, Text).unwrap();
         for event in &events {
             enc.write_event(event).unwrap();
         }
@@ -101,7 +101,7 @@ fn binary_encode_decode_roundtrip() {
 
     let mut buf = Vec::new();
     {
-        let enc = BinaryEncoder::new(&mut buf, &sources).unwrap();
+        let enc = Encoder::new(&mut buf, &sources, Binary).unwrap();
         for event in &events {
             enc.write_event(event).unwrap();
         }
@@ -121,7 +121,7 @@ fn transcode_text_to_binary() {
     // encode directly to binary
     let mut direct = Vec::new();
     {
-        let enc = BinaryEncoder::new(&mut direct, &sources).unwrap();
+        let enc = Encoder::new(&mut direct, &sources, Binary).unwrap();
         for event in &events {
             enc.write_event(event).unwrap();
         }
@@ -130,7 +130,7 @@ fn transcode_text_to_binary() {
     // encode to text then transcode to binary
     let mut txt_buf = Vec::new();
     {
-        let txt_enc = TextEncoder::new(&mut txt_buf, &sources).unwrap();
+        let txt_enc = Encoder::new(&mut txt_buf, &sources, Text).unwrap();
         for event in &events {
             txt_enc.write_event(event).unwrap();
         }
@@ -139,7 +139,7 @@ fn transcode_text_to_binary() {
     let dec = Decoder::new(txt_buf.as_slice(), Text).unwrap();
     let mut transcoded = Vec::new();
     {
-        let bin_enc = BinaryEncoder::new(&mut transcoded, dec.sources()).unwrap();
+        let bin_enc = Encoder::new(&mut transcoded, dec.sources(), Binary).unwrap();
         for event in dec {
             bin_enc.write_event(&event.unwrap()).unwrap();
         }
@@ -156,7 +156,7 @@ fn transcode_binary_to_text() {
     // encode directly to text
     let mut direct_txt = Vec::new();
     {
-        let enc = TextEncoder::new(&mut direct_txt, &sources).unwrap();
+        let enc = Encoder::new(&mut direct_txt, &sources, Text).unwrap();
         for event in &events {
             enc.write_event(event).unwrap();
         }
@@ -165,7 +165,7 @@ fn transcode_binary_to_text() {
     // encode to binary then transcode to text
     let mut bin_buf = Vec::new();
     {
-        let bin_enc = BinaryEncoder::new(&mut bin_buf, &sources).unwrap();
+        let bin_enc = Encoder::new(&mut bin_buf, &sources, Binary).unwrap();
         for event in &events {
             bin_enc.write_event(event).unwrap();
         }
@@ -174,7 +174,7 @@ fn transcode_binary_to_text() {
     let dec = Decoder::new(bin_buf.as_slice(), Format::Binary).unwrap();
     let mut transcoded_txt = Vec::new();
     {
-        let txt_enc = TextEncoder::new(&mut transcoded_txt, dec.sources()).unwrap();
+        let txt_enc = Encoder::new(&mut transcoded_txt, dec.sources(), Text).unwrap();
         for event in dec {
             txt_enc.write_event(&event.unwrap()).unwrap();
         }
@@ -191,7 +191,7 @@ fn shared_encoder_matches_direct() {
     // direct encoding
     let mut direct = Vec::new();
     {
-        let enc = TextEncoder::new(&mut direct, &sources).unwrap();
+        let enc = Encoder::new(&mut direct, &sources, Text).unwrap();
         for event in &events {
             enc.write_event(event).unwrap();
         }
@@ -200,7 +200,7 @@ fn shared_encoder_matches_direct() {
     // shared encoder
     let mut shared_buf = Vec::new();
     {
-        let enc = TextEncoder::new(&mut shared_buf, &sources).unwrap();
+        let enc = Encoder::new(&mut shared_buf, &sources, Text).unwrap();
         let cpu0 = enc.source(0).unwrap();
         let cpu1 = enc.source(1).unwrap();
         for event in &events {
@@ -223,7 +223,7 @@ fn demux_reencodes_correctly() {
     // direct encoding
     let mut direct = Vec::new();
     {
-        let enc = TextEncoder::new(&mut direct, &sources).unwrap();
+        let enc = Encoder::new(&mut direct, &sources, Text).unwrap();
         for event in &events {
             enc.write_event(event).unwrap();
         }
@@ -232,7 +232,7 @@ fn demux_reencodes_correctly() {
     // encode to text, demux and re-encode
     let mut reencoded = Vec::new();
     {
-        let enc = TextEncoder::new(&mut reencoded, &sources).unwrap();
+        let enc = Encoder::new(&mut reencoded, &sources, Text).unwrap();
         let cpu0 = enc.source(0).unwrap();
         let cpu1 = enc.source(1).unwrap();
 

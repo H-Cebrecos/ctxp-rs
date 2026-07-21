@@ -7,6 +7,7 @@ use std::{
 };
 
 use crate::{AccessWidth, Error, Event, EventKind, Format, InfoKind, Source, unpack_counter};
+
 struct DecoderState<R: BufRead> {
     reader: R,
     sources: Vec<Source>,
@@ -323,26 +324,23 @@ pub struct Decoder<R: BufRead> {
 
 impl<R: BufRead> Decoder<R> {
     pub fn new(reader: R, format: Format) -> crate::Result<Self> {
+        let mut state = DecoderState {
+            reader: reader,
+            sources: Vec::new(),
+        };
+
         match format {
             Format::Binary => {
-                let mut state = DecoderState {
-                    reader: reader,
-                    sources: Vec::new(),
-                };
                 state.read_header_binary()?;
                 state.read_metadata_binary()?;
-                Ok(Self { format, state })
             }
             Format::Text => {
-                let mut state = DecoderState {
-                    reader: reader,
-                    sources: Vec::new(),
-                };
                 state.read_header_text()?;
                 state.read_metadata_text()?;
-                Ok(Self { format, state })
             }
         }
+
+        Ok(Self { format, state })
     }
 
     /// Returns the event sources described by the stream metadata.
